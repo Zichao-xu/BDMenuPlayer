@@ -30,11 +30,9 @@
 
 ---
 
-<p align="center"><em>Showcase screenshot coming soon — 给介绍页留一点二次元空间。</em></p>
-
-<!-- Add docs/showcase.png, then replace the line above with:
 <p align="center"><img src="docs/showcase.png" width="100%" alt="BD Menu Player playing a Blu-ray disc"></p>
--->
+
+<p align="center"><sub>Original Blu-ray menu playback with bilingual external subtitles.</sub></p>
 
 ## 功能
 
