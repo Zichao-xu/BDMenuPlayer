@@ -1,0 +1,13 @@
+.DS_Store
+.build/
+.swiftpm/
+Dependencies/
+Downloads/
+dist/
+*.dmg
+*.ass
+*.ssa
+*.srt
+*.m2ts
+*.mpls
+*.iso
