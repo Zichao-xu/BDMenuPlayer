@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include <pthread.h>
 
 struct VLCBridge {
     libvlc_instance_t *instance;
@@ -11,7 +13,29 @@ struct VLCBridge {
     libvlc_media_t *media;
     void *video_view;
     char error[512];
+    pthread_mutex_t log_lock;
+    char log_errors[1024];
 };
+
+// libVLC reports why an input could not be opened (missing AACS library,
+// unreadable disc, …) only through its log. Keep the error-level lines of the
+// current playback attempt so the UI can explain a failure instead of showing
+// a black surface.
+static void log_callback(void *data, int level, const libvlc_log_t *ctx, const char *fmt, va_list args) {
+    (void)ctx;
+    if (level != LIBVLC_ERROR || !data) {
+        return;
+    }
+    VLCBridge *bridge = data;
+    char line[256];
+    vsnprintf(line, sizeof(line), fmt, args);
+    pthread_mutex_lock(&bridge->log_lock);
+    size_t used = strlen(bridge->log_errors);
+    if (!strstr(bridge->log_errors, line) && used + strlen(line) + 2 < sizeof(bridge->log_errors)) {
+        snprintf(bridge->log_errors + used, sizeof(bridge->log_errors) - used, "%s%s", used ? "\n" : "", line);
+    }
+    pthread_mutex_unlock(&bridge->log_lock);
+}
 
 static void set_error(VLCBridge *bridge, const char *fallback) {
     if (!bridge) {
@@ -26,6 +50,7 @@ VLCBridge *vlcbridge_create(const char *plugin_path) {
     if (!bridge) {
         return NULL;
     }
+    pthread_mutex_init(&bridge->log_lock, NULL);
 
     if (plugin_path && plugin_path[0]) {
         setenv("VLC_PLUGIN_PATH", plugin_path, 1);
@@ -38,9 +63,11 @@ VLCBridge *vlcbridge_create(const char *plugin_path) {
 
     bridge->instance = libvlc_new(3, arguments);
     if (!bridge->instance) {
+        pthread_mutex_destroy(&bridge->log_lock);
         free(bridge);
         return NULL;
     }
+    libvlc_log_set(bridge->instance, log_callback, bridge);
 
     bridge->player = libvlc_media_player_new(bridge->instance);
     if (!bridge->player) {
@@ -61,8 +88,10 @@ void vlcbridge_destroy(VLCBridge *bridge) {
         libvlc_media_release(bridge->media);
     }
     if (bridge->instance) {
+        libvlc_log_unset(bridge->instance);
         libvlc_release(bridge->instance);
     }
+    pthread_mutex_destroy(&bridge->log_lock);
     free(bridge);
 }
 
@@ -86,6 +115,10 @@ int vlcbridge_play_bluray(VLCBridge *bridge, const char *disc_path, const char *
         libvlc_media_release(bridge->media);
         bridge->media = NULL;
     }
+    bridge->error[0] = 0;
+    pthread_mutex_lock(&bridge->log_lock);
+    bridge->log_errors[0] = 0;
+    pthread_mutex_unlock(&bridge->log_lock);
 
     size_t mrl_length = strlen(disc_path) + 16;
     char *mrl = malloc(mrl_length);
@@ -246,4 +279,14 @@ const char *vlcbridge_last_error(const VLCBridge *bridge) {
         return NULL;
     }
     return bridge->error;
+}
+
+size_t vlcbridge_copy_log_errors(VLCBridge *bridge, char *buffer, size_t length) {
+    if (!bridge || !buffer || length == 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&bridge->log_lock);
+    snprintf(buffer, length, "%s", bridge->log_errors);
+    pthread_mutex_unlock(&bridge->log_lock);
+    return strlen(buffer);
 }

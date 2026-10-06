@@ -36,7 +36,11 @@ final class DiscProbeTests: XCTestCase {
             throw XCTSkip("Run scripts/setup-vlc.sh to install the local VLC runtime")
         }
 
-        _ = BackendLocator.prepareMakeMKVIntegration()
+        BackendLocator.prepareMakeMKVIntegration()
+        let info = DiscTechnicalInfo.inspect(path: discURL, fallbackName: "fixture")
+        if info.needsDecryptionBackend {
+            throw XCTSkip("Disc needs an AACS backend; covered by testUndecryptableDiscReportsAACSReason")
+        }
         let bridge = pluginPath.withCString { vlcbridge_create($0) }
         XCTAssertNotNil(bridge)
         guard let bridge else { return }
@@ -63,6 +67,36 @@ final class DiscProbeTests: XCTestCase {
             usleep(200_000)
         }
         XCTFail("Blu-ray menu did not reach playback; states: \(observedStates.sorted())")
+    }
+
+    /// libVLC only reports "Ended" for an AACS disc it cannot open; the reason
+    /// must come through the bridge's error log so the UI can explain it.
+    func testUndecryptableDiscReportsAACSReason() throws {
+        let discURL = try configuredDiscURL()
+        BackendLocator.prepareMakeMKVIntegration()
+        let info = DiscTechnicalInfo.inspect(path: discURL, fallbackName: "fixture")
+        guard info.needsDecryptionBackend else {
+            throw XCTSkip("Disc opens without a missing AACS backend")
+        }
+        let pluginPath = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Dependencies/VLC/plugins").path
+        guard let bridge = pluginPath.withCString({ vlcbridge_create($0) }) else {
+            return XCTFail("Unable to create libVLC bridge")
+        }
+        defer { vlcbridge_destroy(bridge) }
+
+        _ = discURL.path.withCString { vlcbridge_play_bluray(bridge, $0, nil) }
+        var log = ""
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline, !log.contains("AACS") {
+            usleep(200_000)
+            var buffer = [CChar](repeating: 0, count: 1024)
+            vlcbridge_copy_log_errors(bridge, &buffer, buffer.count)
+            log = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        }
+        XCTAssertTrue(log.contains("AACS"), "Bridge log: \(log)")
+        XCTAssertNotEqual(vlcbridge_player_state(bridge), 3)
     }
 
     func testASSParserReturnsBilingualLines() throws {

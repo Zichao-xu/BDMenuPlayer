@@ -2,11 +2,20 @@ import Foundation
 import Darwin
 
 enum BackendLocator {
-    static let makeMKVLibraryCandidates = [
-        URL(fileURLWithPath: "/Applications/MakeMKV.app/Contents/lib/libmmbd_new.dylib"),
-        FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: "Applications/MakeMKV.app/Contents/lib/libmmbd_new.dylib")
-    ]
+    static let makeMKVDownloadURL = URL(string: "https://www.makemkv.com/download/")!
+
+    static var makeMKVLibraryCandidates: [URL] {
+        let appRoots = [
+            URL(fileURLWithPath: "/Applications/MakeMKV.app"),
+            FileManager.default.homeDirectoryForCurrentUser.appending(path: "Applications/MakeMKV.app")
+        ]
+        // MakeMKV has shipped the libaacs-compatible shim under both names.
+        return appRoots.flatMap { root in
+            ["libmmbd_new.dylib", "libmmbd.dylib"].map {
+                root.appending(path: "Contents/lib/\($0)")
+            }
+        }
+    }
 
     static var makeMKVLibrary: URL? {
         makeMKVLibraryCandidates.first {
@@ -14,6 +23,10 @@ enum BackendLocator {
         }
     }
 
+    /// Points libbluray at a user-installed MakeMKV backend. Safe to call
+    /// repeatedly, so a backend installed while the app is running is picked
+    /// up on the next disc scan.
+    @discardableResult
     static func prepareMakeMKVIntegration() -> Bool {
         guard let source = makeMKVLibrary else { return false }
 

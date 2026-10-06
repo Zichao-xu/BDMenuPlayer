@@ -42,6 +42,7 @@
 - 支持 ASS、SSA、SRT 外挂字幕与双语字幕叠加显示
 - 可将两集字幕按光盘主片章节边界自动衔接
 - Liquid Glass 悬浮控制栏、自动隐藏与原生 macOS 全屏
+- 插入/弹出光盘自动刷新；缺少解密后端或打不开光盘时明确提示原因
 - 支持章节切换、±10 秒、进度跳转、音量、静音和菜单导航
 - 自动发现用户自行安装的 MakeMKV/libmmbd 解密后端
 
@@ -67,7 +68,7 @@
 - Apple Silicon Mac
 - macOS 26 或更高版本
 - Xcode 26+ / Swift 6.2+（仅自行构建时需要）
-- Homebrew `libbluray` 1.5+
+- Homebrew `libbluray` 1.5+（仅自行构建时需要，Release 已内置）
 - 加密商业光盘：用户自行安装的 MakeMKV（可选、不会随本项目分发）
 
 当前版本仅面向 Apple Silicon。Intel Mac 尚未测试。
@@ -75,14 +76,14 @@
 ## 下载
 
 从 [Releases](https://github.com/Zichao-xu/BDMenuPlayer/releases/latest)
-下载 `BDMenuPlayer-v0.1.0-arm64.zip`，解压后运行应用。
+下载 `BDMenuPlayer-v<版本>-arm64.zip`，解压后运行应用。libbluray 已打包进
+应用，无需再装 Homebrew。
 
 这是未经 Apple 公证的早期预览版。首次启动时，macOS 可能要求你在
-**系统设置 → 隐私与安全性** 中确认打开。运行时仍需通过 Homebrew 安装：
+**系统设置 → 隐私与安全性** 中确认打开。
 
-```sh
-brew install libbluray
-```
+插入光盘后会自动识别。若光盘使用 AACS 加密而本机没有可用的解密后端，
+播放区会直接说明原因并给出安装 MakeMKV 的入口；装好或激活后点“重新检测”即可。
 
 ## 构建
 

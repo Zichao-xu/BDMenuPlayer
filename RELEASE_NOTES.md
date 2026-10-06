@@ -1,23 +1,25 @@
-# BD Menu Player 0.1.0
+# BD Menu Player 0.2.0
 
-The first public preview of a native Apple Silicon Blu-ray menu player for
-macOS.
+## 修复
 
-## Highlights
+- 加密光盘在缺少 AACS 解密后端时，点击播放后一直黑屏、播放按钮无反应。
+  现在播放区会在点击前就说明“需要 AACS 解密后端”，并提供获取 MakeMKV
+  与“重新检测”入口；MakeMKV 已安装但未能解密时提示检查激活状态。
+- libVLC 打不开光盘时只报告“Ended”，被误当成菜单切换。现在会识别为失败，
+  并显示 libVLC 给出的真实错误原因。
+- 会话结束或失败后，播放按钮会重新打开光盘，而不是对已停止的播放器无效地暂停。
 
-- Original HDMV disc menus with directional navigation and activation
-- Native SwiftUI/AppKit interface with Liquid Glass playback controls
-- Hardware-assisted H.264 playback through VideoToolbox and LibVLC
-- External ASS, SSA, and SRT subtitles
-- Automatic two-file subtitle composition for multi-episode main features
-- Chapter navigation, seeking, volume, mute, keyboard shortcuts, and full screen
-- Optional MakeMKV/libmmbd discovery for encrypted discs
+## 改进
 
-## Requirements
+- 插入或弹出光盘自动刷新列表，无需手动点刷新；运行中安装的 MakeMKV 也会被发现。
+- libbluray 及其依赖打包进应用，下载版不再需要 Homebrew。
+- 控制栏字幕按钮可直接选择/更换外挂字幕；清除字幕会同步移除画面上的字幕。
+- 播放中切换光盘或光盘被弹出时自动停止旧会话。
+- MakeMKV 后端同时识别 `libmmbd_new.dylib` 与 `libmmbd.dylib`。
 
-- Apple Silicon Mac running macOS 26 or later
-- Homebrew `libbluray` 1.5 or later
-- MakeMKV installed separately when an encrypted disc requires it
+## 要求
 
-This is an unsigned preview build. After downloading, macOS may require the
-user to approve opening it from Privacy & Security settings.
+- Apple Silicon Mac，macOS 26 或更高
+- 加密光盘需另行安装并激活 MakeMKV
+
+未经公证的预览版，首次打开可能需要在“隐私与安全性”中确认。

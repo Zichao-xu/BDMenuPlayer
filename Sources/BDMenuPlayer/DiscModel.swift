@@ -20,6 +20,10 @@ struct DiscTechnicalInfo: Hashable, Sendable {
     let mainChapterStarts: [TimeInterval]
     let error: String?
 
+    /// True when the disc cannot be opened at all because its AACS layer has
+    /// no working decryption backend. libVLC would only report "Ended".
+    var needsDecryptionBackend: Bool { usesAACS && !aacsReady }
+
     static func inspect(path: URL, fallbackName: String) -> DiscTechnicalInfo {
         let probe = path.path.withCString { bdprobe_create($0) }
         guard let probe else {

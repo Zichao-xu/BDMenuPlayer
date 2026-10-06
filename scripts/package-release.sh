@@ -3,7 +3,7 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-version="${1:-0.1.0}"
+version="${1:?usage: package-release.sh <version>}"
 output_dir="$project_dir/dist"
 
 "$project_dir/scripts/build-app.sh"

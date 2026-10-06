@@ -15,7 +15,10 @@ struct ContentView: View {
                 PlayerSurfaceView(
                     playback: playback,
                     isFullScreen: true,
-                    onPlay: { model.playSelectedDisc() }
+                    disc: model.selectedDisc,
+                    onPlay: { model.playSelectedDisc() },
+                    onRecheck: { model.recheckBackend() },
+                    onChooseSubtitle: { model.chooseSubtitle() }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.black)
@@ -67,6 +70,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 620)
+        .onChange(of: model.selectedDiscID) { _, _ in model.selectionChanged() }
     }
 }
 
@@ -102,7 +106,10 @@ private struct DiscDetailView: View {
                 PlayerSurfaceView(
                     playback: playback,
                     isFullScreen: false,
-                    onPlay: { model.playSelectedDisc() }
+                    disc: disc,
+                    onPlay: { model.playSelectedDisc() },
+                    onRecheck: { model.recheckBackend() },
+                    onChooseSubtitle: { model.chooseSubtitle() }
                 )
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .background(.black)
@@ -111,7 +118,7 @@ private struct DiscDetailView: View {
                 GroupBox("Disc capabilities") {
                     Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
                         infoRow("Titles", "\(disc.info.titleCount) total · \(disc.info.hdmvTitleCount) HDMV · \(disc.info.bdjTitleCount) BD-J")
-                        infoRow("AACS", aacsStatus(for: disc.info))
+                        infoRow("AACS", aacsStatus(for: disc.info), warning: disc.info.needsDecryptionBackend)
                         infoRow("BD+", disc.info.usesBDPlus ? (disc.info.bdplusReady ? "Ready" : "Detected — backend required") : "Not used")
                         infoRow("libbluray", disc.info.libblurayVersion + " · ARM64")
                     }
@@ -167,10 +174,12 @@ private struct DiscDetailView: View {
     }
 
     @ViewBuilder
-    private func infoRow(_ label: String, _ value: String) -> some View {
+    private func infoRow(_ label: String, _ value: String, warning: Bool = false) -> some View {
         GridRow {
             Text(label).foregroundStyle(.secondary)
-            Text(value).textSelection(.enabled)
+            Text(value)
+                .foregroundStyle(warning ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                .textSelection(.enabled)
         }
     }
 }
@@ -178,7 +187,20 @@ private struct DiscDetailView: View {
 private struct PlayerSurfaceView: View {
     @ObservedObject var playback: PlaybackController
     let isFullScreen: Bool
+    let disc: DiscVolume?
     let onPlay: () -> Void
+    let onRecheck: () -> Void
+    let onChooseSubtitle: () -> Void
+
+    /// A failure from the last attempt, or one that is already certain from
+    /// the disc probe, so the user sees it before pressing Play.
+    private var blocker: PlaybackFailure? {
+        if let failure = playback.failure { return failure }
+        if disc?.info.needsDecryptionBackend == true {
+            return .decryption(backendInstalled: BackendLocator.makeMKVLibrary != nil)
+        }
+        return nil
+    }
 
     @State private var showsControls = true
     @State private var hideTask: Task<Void, Never>?
@@ -190,17 +212,21 @@ private struct PlayerSurfaceView: View {
             MouseActivityView(onActivity: revealControls)
 
             if !playback.isSessionActive {
-                VStack(spacing: 10) {
-                    Image(systemName: "opticaldisc")
-                        .font(.system(size: 42))
-                    Text("Blu-ray menu preview")
-                        .font(.headline)
-                    Button("Play Disc Menu", systemImage: "play.fill", action: onPlay)
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.large)
-                        .keyboardShortcut(.return, modifiers: [.command])
+                if let blocker {
+                    PlaybackBlockerView(failure: blocker, onRetry: onPlay, onRecheck: onRecheck)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "opticaldisc")
+                            .font(.system(size: 42))
+                        Text("Blu-ray menu preview")
+                            .font(.headline)
+                        Button("Play Disc Menu", systemImage: "play.fill", action: onPlay)
+                            .buttonStyle(.glassProminent)
+                            .controlSize(.large)
+                            .keyboardShortcut(.return, modifiers: [.command])
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
             }
 
             if !playback.subtitleLines.isEmpty {
@@ -228,6 +254,7 @@ private struct PlayerSurfaceView: View {
             if playback.isSessionActive, showsControls {
                 PlayerControlsOverlay(
                     playback: playback,
+                    onChooseSubtitle: onChooseSubtitle,
                     onHoverChanged: { hovering in
                         controlsHovered = hovering
                         if hovering {
@@ -322,6 +349,7 @@ private struct MenuDirectionPad: View {
 
 private struct PlayerControlsOverlay: View {
     @ObservedObject var playback: PlaybackController
+    let onChooseSubtitle: () -> Void
     let onHoverChanged: (Bool) -> Void
     @State private var showsMenuPad = false
 
@@ -360,8 +388,11 @@ private struct PlayerControlsOverlay: View {
                             }
                             .padding(16)
                         }
-                    controlButton("captions.bubble.fill", "双语字幕已启用") { }
-                        .foregroundStyle(playback.subtitleLines.isEmpty ? .secondary : .primary)
+                    controlButton(
+                        playback.hasSubtitle ? "captions.bubble.fill" : "captions.bubble",
+                        playback.hasSubtitle ? "更换外挂字幕 · ⇧⌘O" : "选择外挂字幕 · ⇧⌘O",
+                        action: onChooseSubtitle
+                    )
                     controlButton("stop.fill", "停止") { playback.stop() }
                     controlButton("arrow.up.left.and.arrow.down.right", "全屏 · F") {
                         playback.toggleFullScreen()
@@ -450,5 +481,54 @@ private struct StatusBadge: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(.quaternary, in: Capsule())
+    }
+}
+
+private struct PlaybackBlockerView: View {
+    let failure: PlaybackFailure
+    let onRetry: () -> Void
+    let onRecheck: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: failure.kind == .openFailed ? "exclamationmark.triangle" : "lock.shield")
+                .font(.system(size: 40))
+                .foregroundStyle(.orange)
+            Text(failure.title)
+                .font(.title3.weight(.semibold))
+            Text(failure.detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .frame(maxWidth: 460)
+            HStack(spacing: 10) {
+                switch failure.kind {
+                case .decryptionBackendMissing:
+                    Link(destination: BackendLocator.makeMKVDownloadURL) {
+                        Label("获取 MakeMKV", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.glassProminent)
+                    Button("重新检测", systemImage: "arrow.clockwise", action: onRecheck)
+                        .buttonStyle(.glass)
+                case .decryptionBackendInactive:
+                    Button("打开 MakeMKV", systemImage: "arrow.up.forward.app") {
+                        if let app = BackendLocator.makeMKVLibrary?
+                            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() {
+                            NSWorkspace.shared.open(app)
+                        }
+                    }
+                    .buttonStyle(.glassProminent)
+                    Button("重新检测", systemImage: "arrow.clockwise", action: onRecheck)
+                        .buttonStyle(.glass)
+                case .openFailed:
+                    Button("重试", systemImage: "arrow.clockwise", action: onRetry)
+                        .buttonStyle(.glassProminent)
+                }
+            }
+            .controlSize(.large)
+        }
+        .foregroundStyle(.primary)
+        .padding(28)
     }
 }

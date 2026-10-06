@@ -1,6 +1,7 @@
 #ifndef VLCBRIDGE_H
 #define VLCBRIDGE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -41,6 +42,7 @@ void vlcbridge_toggle_audio_mute(VLCBridge *bridge);
 int vlcbridge_subtitle_track_count(const VLCBridge *bridge);
 
 const char *vlcbridge_last_error(const VLCBridge *bridge);
+size_t vlcbridge_copy_log_errors(VLCBridge *bridge, char *buffer, size_t length);
 
 #ifdef __cplusplus
 }
