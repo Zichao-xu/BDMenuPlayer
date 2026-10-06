@@ -379,15 +379,27 @@ private struct PlayerControlsOverlay: View {
                         .disabled(!playback.isMainFeatureActive)
                     Spacer(minLength: 16)
 
-                    controlButton("menucard", "蓝光菜单控制") { showsMenuPad.toggle() }
-                        .popover(isPresented: $showsMenuPad, arrowEdge: .bottom) {
-                            VStack(spacing: 10) {
-                                Text("Blu-ray Menu").font(.headline)
+                    // The disc's own popup menu is toggled by the same key that
+                    // opens it; this is the "back / close menu" of a BD remote.
+                    controlButton("menucard", "打开/关闭光盘菜单 · P 或 Delete") {
+                        playback.navigate(.popup)
+                    }
+                    controlButton("dpad", "菜单方向键（键盘方向键 + Return 也可）") { showsMenuPad.toggle() }
+                        .popover(isPresented: $showsMenuPad, arrowEdge: .top) {
+                            HStack(spacing: 14) {
                                 MenuDirectionPad(playback: playback, enableShortcuts: false)
-                                Button("Popup Menu") { playback.navigate(.popup) }
+                                Button {
+                                    playback.navigate(.popup)
+                                    showsMenuPad = false
+                                } label: {
+                                    Label("关闭菜单", systemImage: "chevron.down.circle")
+                                }
+                                .help("关闭光盘弹出菜单并收起方向键")
                             }
-                            .padding(16)
+                            .padding(12)
                         }
+                        // Keep the bar (and so the popover) up while the pad is in use.
+                        .onChange(of: showsMenuPad) { _, shown in onHoverChanged(shown) }
                     controlButton(
                         playback.hasSubtitle ? "captions.bubble.fill" : "captions.bubble",
                         playback.hasSubtitle ? "更换外挂字幕 · ⇧⌘O" : "选择外挂字幕 · ⇧⌘O",

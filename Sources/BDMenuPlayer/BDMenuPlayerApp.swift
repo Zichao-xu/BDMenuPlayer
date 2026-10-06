@@ -21,6 +21,8 @@ struct BDMenuPlayerApp: App {
                     .keyboardShortcut("m", modifiers: [])
                 Button("Blu-ray Popup Menu") { model.playback.navigate(.popup) }
                     .keyboardShortcut("p", modifiers: [])
+                Button("Close Blu-ray Menu") { model.playback.navigate(.popup) }
+                    .keyboardShortcut(.delete, modifiers: [])
                 Button("Menu Up") { model.playback.navigate(.up) }
                     .keyboardShortcut(.upArrow, modifiers: [])
                 Button("Menu Down") { model.playback.navigate(.down) }

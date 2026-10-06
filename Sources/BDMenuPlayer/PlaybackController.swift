@@ -141,7 +141,7 @@ struct PlaybackFailure: Equatable, Sendable {
             ? PlaybackFailure(
                 kind: .decryptionBackendInactive,
                 title: "MakeMKV 无法解密这张光盘",
-                detail: "已找到 MakeMKV,但它未能解开 AACS。打开 MakeMKV 确认已激活（Beta Key 未过期）并能读取这张光盘，然后重试。"
+                detail: "已找到 MakeMKV,但它未能解开 AACS。常见原因：① 从未在 MakeMKV 里同意开始试用或输入激活码——打开 MakeMKV 读一次这张光盘并确认；② MakeMKV 窗口还开着，它会独占光驱、卸载光盘——确认后退出 MakeMKV,再点“重新检测”。"
             )
             : PlaybackFailure(
                 kind: .decryptionBackendMissing,
