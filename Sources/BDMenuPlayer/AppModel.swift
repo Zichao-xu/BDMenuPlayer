@@ -5,7 +5,13 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var discs: [DiscVolume] = []
-    @Published var selectedDiscID: DiscVolume.ID?
+    @Published var selectedDiscID: DiscVolume.ID? {
+        didSet {
+            guard selectedDiscID != oldValue else { return }
+            selectionChanged()
+            autoPlayIfReady()
+        }
+    }
     @Published private(set) var externalSubtitle: URL?
     @Published private(set) var externalSubtitleLabel: String?
     @Published private(set) var subtitleError: String?
@@ -13,6 +19,8 @@ final class AppModel: ObservableObject {
     let playback = PlaybackController()
     private var scanTask: Task<Void, Never>?
     private var volumeObservers: [NSObjectProtocol] = []
+    /// Discs that already started on their own, so Stop is not undone by a rescan.
+    private var autoPlayedDiscIDs: Set<DiscVolume.ID> = []
 
     var selectedDisc: DiscVolume? {
         guard let selectedDiscID else { return discs.first }
@@ -58,6 +66,7 @@ final class AppModel: ObservableObject {
                 self.selectedDiscID = scanned.first?.id
             }
             self.isScanning = false
+            self.autoPlayIfReady()
         }
     }
 
@@ -97,8 +106,22 @@ final class AppModel: ObservableObject {
         refreshDiscs()
     }
 
+    /// Like a hardware player: an inserted disc starts its menu by itself,
+    /// unless it is known not to open.
+    private func autoPlayIfReady() {
+        guard
+            let disc = selectedDisc,
+            !disc.info.needsDecryptionBackend,
+            !playback.isSessionActive,
+            playback.failure == nil,
+            !autoPlayedDiscIDs.contains(disc.id)
+        else { return }
+        autoPlayedDiscIDs.insert(disc.id)
+        playSelectedDisc()
+    }
+
     /// Stops a session that belongs to a disc other than the selected one.
-    func selectionChanged() {
+    private func selectionChanged() {
         guard let active = playback.activeDiscID, active != selectedDiscID else { return }
         playback.stop()
         playback.dismissFailure()

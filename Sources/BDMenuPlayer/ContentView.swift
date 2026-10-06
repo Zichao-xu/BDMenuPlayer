@@ -1,232 +1,111 @@
+import AppKit
 import SwiftUI
 
+/// The window is the picture. Everything else lives in the auto-hiding
+/// control bar or its popovers.
 struct ContentView: View {
     @ObservedObject var model: AppModel
-    @ObservedObject private var playback: PlaybackController
-
-    init(model: AppModel) {
-        self.model = model
-        self.playback = model.playback
-    }
 
     var body: some View {
-        Group {
-            if playback.isFullScreen, model.selectedDisc != nil {
-                PlayerSurfaceView(
-                    playback: playback,
-                    isFullScreen: true,
-                    disc: model.selectedDisc,
-                    onPlay: { model.playSelectedDisc() },
-                    onRecheck: { model.recheckBackend() },
-                    onChooseSubtitle: { model.chooseSubtitle() }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.black)
-                .ignoresSafeArea()
+        ZStack {
+            Color.black
+            if let disc = model.selectedDisc {
+                PlayerSurfaceView(model: model, disc: disc)
             } else {
-                standardLayout
+                EmptyDiscView(isScanning: model.isScanning, onRefresh: { model.refreshDiscs() })
             }
         }
+        .overlay(alignment: .top) { WindowDragStrip() }
+        .ignoresSafeArea()
+        .frame(minWidth: 640, minHeight: 360)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
-            playback.didEnterFullScreen()
+            model.playback.didEnterFullScreen()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
-            playback.didExitFullScreen()
+            model.playback.didExitFullScreen()
         }
-    }
-
-    private var standardLayout: some View {
-        NavigationSplitView {
-            List(selection: $model.selectedDiscID) {
-                Section("Blu-ray Discs") {
-                    ForEach(model.discs) { disc in
-                        Label(disc.info.displayName, systemImage: "opticaldisc")
-                            .tag(disc.id)
-                    }
-                }
-            }
-            .navigationTitle("BD Menu")
-            .toolbar {
-                if model.isScanning {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Button("Refresh", systemImage: "arrow.clockwise") {
-                        model.refreshDiscs()
-                    }
-                }
-            }
-        } detail: {
-            if let disc = model.selectedDisc {
-                DiscDetailView(disc: disc, model: model)
-            } else if model.isScanning {
-                ProgressView("Reading Blu-ray disc…")
-            } else {
-                ContentUnavailableView(
-                    "No Blu-ray Disc",
-                    systemImage: "opticaldisc",
-                    description: Text("Insert a Blu-ray disc, then refresh.")
-                )
-            }
-        }
-        .frame(minWidth: 900, minHeight: 620)
-        .onChange(of: model.selectedDiscID) { _, _ in model.selectionChanged() }
     }
 }
 
-private struct DiscDetailView: View {
-    let disc: DiscVolume
-    @ObservedObject var model: AppModel
-    @ObservedObject private var playback: PlaybackController
-
-    init(disc: DiscVolume, model: AppModel) {
-        self.disc = disc
-        self.model = model
-        self.playback = model.playback
-    }
+private struct EmptyDiscView: View {
+    let isScanning: Bool
+    let onRefresh: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(disc.info.displayName)
-                        .font(.largeTitle.weight(.semibold))
-                    Text(disc.mountURL.path)
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 12) {
-                    StatusBadge(label: "Top Menu", ready: disc.info.hasTopMenu)
-                    StatusBadge(label: "First Play", ready: disc.info.hasFirstPlay)
-                    StatusBadge(label: "HDMV", ready: disc.info.hdmvTitleCount > 0)
-                    StatusBadge(label: "BD-J", ready: disc.info.usesBDJ)
-                }
-
-                PlayerSurfaceView(
-                    playback: playback,
-                    isFullScreen: false,
-                    disc: disc,
-                    onPlay: { model.playSelectedDisc() },
-                    onRecheck: { model.recheckBackend() },
-                    onChooseSubtitle: { model.chooseSubtitle() }
-                )
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .background(.black)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                GroupBox("Disc capabilities") {
-                    Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
-                        infoRow("Titles", "\(disc.info.titleCount) total · \(disc.info.hdmvTitleCount) HDMV · \(disc.info.bdjTitleCount) BD-J")
-                        infoRow("AACS", aacsStatus(for: disc.info), warning: disc.info.needsDecryptionBackend)
-                        infoRow("BD+", disc.info.usesBDPlus ? (disc.info.bdplusReady ? "Ready" : "Detected — backend required") : "Not used")
-                        infoRow("libbluray", disc.info.libblurayVersion + " · ARM64")
-                    }
-                    .padding(8)
-                }
-
-                GroupBox("External subtitle") {
-                    HStack {
-                        Image(systemName: "captions.bubble")
-                            .font(.title2)
-                        VStack(alignment: .leading) {
-                            Text(model.externalSubtitleLabel ?? "No subtitle selected")
-                                .font(.headline)
-                            Text("Select multiple ASS files to merge split episodes on a combined BD title.")
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if model.externalSubtitle != nil {
-                            Button("Clear") { model.clearSubtitle() }
-                        }
-                        Button("Choose…") { model.chooseSubtitle() }
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .padding(8)
-                    if let subtitleError = model.subtitleError {
-                        Label(subtitleError, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 8)
-                    }
-                }
-
-                Label(playback.status, systemImage: "wrench.and.screwdriver")
-                    .foregroundStyle(.secondary)
-
-                if let error = disc.info.error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                }
+        VStack(spacing: 12) {
+            if isScanning {
+                ProgressView().controlSize(.large)
+                Text("正在读取光盘…")
+            } else {
+                Image(systemName: "opticaldisc").font(.system(size: 44))
+                Text("插入蓝光光盘")
+                    .font(.title3.weight(.semibold))
+                Button("重新扫描", systemImage: "arrow.clockwise", action: onRefresh)
+                    .buttonStyle(.glass)
             }
-            .padding(28)
         }
-        .navigationTitle("Disc")
+        .foregroundStyle(.secondary)
     }
+}
 
-    private func aacsStatus(for info: DiscTechnicalInfo) -> String {
-        guard info.usesAACS else { return "Not used" }
-        if info.aacsReady { return "Ready" }
-        if BackendLocator.makeMKVLibrary != nil {
-            return "MakeMKV found — activate or renew it"
-        }
-        return "Detected — decryption backend required"
-    }
-
-    @ViewBuilder
-    private func infoRow(_ label: String, _ value: String, warning: Bool = false) -> some View {
-        GridRow {
-            Text(label).foregroundStyle(.secondary)
-            Text(value)
-                .foregroundStyle(warning ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
-                .textSelection(.enabled)
-        }
+/// Invisible strip along the top edge so the title-bar-less window can be moved.
+private struct WindowDragStrip: View {
+    var body: some View {
+        Color.clear
+            .frame(height: 36)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .gesture(WindowDragGesture())
+            .allowsWindowActivationEvents(true)
     }
 }
 
 private struct PlayerSurfaceView: View {
-    @ObservedObject var playback: PlaybackController
-    let isFullScreen: Bool
-    let disc: DiscVolume?
-    let onPlay: () -> Void
-    let onRecheck: () -> Void
-    let onChooseSubtitle: () -> Void
+    @ObservedObject var model: AppModel
+    @ObservedObject private var playback: PlaybackController
+    let disc: DiscVolume
+
+    @State private var showsControls = false
+    @State private var hideTask: Task<Void, Never>?
+    @State private var controlsPinned = false
+
+    init(model: AppModel, disc: DiscVolume) {
+        self.model = model
+        self.playback = model.playback
+        self.disc = disc
+    }
 
     /// A failure from the last attempt, or one that is already certain from
     /// the disc probe, so the user sees it before pressing Play.
     private var blocker: PlaybackFailure? {
         if let failure = playback.failure { return failure }
-        if disc?.info.needsDecryptionBackend == true {
+        if disc.info.needsDecryptionBackend {
             return .decryption(backendInstalled: BackendLocator.makeMKVLibrary != nil)
         }
         return nil
     }
 
-    @State private var showsControls = true
-    @State private var hideTask: Task<Void, Never>?
-    @State private var controlsHovered = false
-
     var body: some View {
         ZStack {
             VideoSurfaceView(controller: playback)
-            MouseActivityView(onActivity: revealControls)
+            MouseActivityView(onActivity: revealControls, onExit: { hideControls(after: .zero) })
 
             if !playback.isSessionActive {
                 if let blocker {
-                    PlaybackBlockerView(failure: blocker, onRetry: onPlay, onRecheck: onRecheck)
+                    PlaybackBlockerView(failure: blocker, onRetry: model.playSelectedDisc, onRecheck: model.recheckBackend)
                 } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "opticaldisc")
-                            .font(.system(size: 42))
-                        Text("Blu-ray menu preview")
-                            .font(.headline)
-                        Button("Play Disc Menu", systemImage: "play.fill", action: onPlay)
+                    VStack(spacing: 12) {
+                        Text(disc.info.displayName)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Button("播放光盘菜单", systemImage: "play.fill", action: model.playSelectedDisc)
                             .buttonStyle(.glassProminent)
                             .controlSize(.large)
                             .keyboardShortcut(.return, modifiers: [.command])
                     }
-                    .foregroundStyle(.secondary)
                 }
+            } else if playback.isOpening {
+                ProgressView().controlSize(.large).allowsHitTesting(false)
             }
 
             if !playback.subtitleLines.isEmpty {
@@ -234,10 +113,7 @@ private struct PlayerSurfaceView: View {
                     Spacer()
                     ForEach(Array(playback.subtitleLines.enumerated()), id: \.offset) { index, line in
                         Text(line)
-                            .font(.system(
-                                size: isFullScreen ? (index == 0 ? 34 : 42) : (index == 0 ? 27 : 34),
-                                weight: .semibold
-                            ))
+                            .font(.system(size: index == 0 ? 30 : 38, weight: .semibold))
                             .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
                             .shadow(color: .black, radius: 2, x: 0, y: 2)
@@ -246,56 +122,221 @@ private struct PlayerSurfaceView: View {
                     }
                 }
                 .padding(.horizontal, 28)
-                .padding(.bottom, playback.isSessionActive && showsControls ? 150 : 34)
-                .animation(.easeOut(duration: 0.2), value: showsControls)
+                .padding(.bottom, 34)
                 .allowsHitTesting(false)
             }
 
             if playback.isSessionActive, showsControls {
-                PlayerControlsOverlay(
+                PlayerControlsBar(
+                    model: model,
                     playback: playback,
-                    onChooseSubtitle: onChooseSubtitle,
-                    onHoverChanged: { hovering in
-                        controlsHovered = hovering
-                        if hovering {
-                            hideTask?.cancel()
-                            withAnimation(.easeOut(duration: 0.12)) { showsControls = true }
-                        } else {
-                            scheduleHide()
-                        }
+                    disc: disc,
+                    onPinnedChanged: { pinned in
+                        controlsPinned = pinned
+                        pinned ? hideTask?.cancel() : hideControls(after: .seconds(2))
                     }
                 )
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                .transition(.opacity)
             }
         }
-        .background(.black)
         .contentShape(Rectangle())
-        .onAppear { revealControls() }
-        .onDisappear { hideTask?.cancel() }
-        .onChange(of: playback.isPlaying) { _, isPlaying in
-            if isPlaying {
-                revealControls()
-            } else {
-                hideTask?.cancel()
-                withAnimation(.easeOut(duration: 0.18)) { showsControls = true }
-            }
+        .onChange(of: showsControls) { _, visible in setWindowChromeVisible(visible || !playback.isSessionActive) }
+        .onChange(of: playback.isSessionActive) { _, active in setWindowChromeVisible(!active || showsControls) }
+        .onDisappear {
+            hideTask?.cancel()
+            setWindowChromeVisible(true)
         }
     }
 
     private func revealControls() {
-        hideTask?.cancel()
-        withAnimation(.easeOut(duration: 0.16)) { showsControls = true }
-        scheduleHide()
+        if !showsControls {
+            withAnimation(.easeOut(duration: 0.15)) { showsControls = true }
+        }
+        hideControls(after: .seconds(2))
     }
 
-    private func scheduleHide() {
+    private func hideControls(after delay: Duration) {
         hideTask?.cancel()
-        guard playback.isPlaying, !controlsHovered else { return }
+        guard !controlsPinned else { return }
         hideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, playback.isPlaying, !controlsHovered else { return }
-            withAnimation(.easeInOut(duration: 0.24)) { showsControls = false }
-            if isFullScreen { NSCursor.setHiddenUntilMouseMoves(true) }
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            guard !Task.isCancelled, !controlsPinned else { return }
+            withAnimation(.easeInOut(duration: 0.3)) { showsControls = false }
+            if playback.isSessionActive { NSCursor.setHiddenUntilMouseMoves(true) }
+        }
+    }
+
+    /// Traffic-light buttons fade with the controls so nothing sits on the picture.
+    private func setWindowChromeVisible(_ visible: Bool) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(kind)?.superview?.animator().alphaValue = visible ? 1 : 0
+        }
+    }
+}
+
+private struct PlayerControlsBar: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var playback: PlaybackController
+    let disc: DiscVolume
+    let onPinnedChanged: (Bool) -> Void
+
+    @State private var hovering = false
+    @State private var showsMenuPad = false
+    @State private var showsInfo = false
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Button {
+                    playback.togglePause()
+                } label: {
+                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 17, weight: .bold))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.glassProminent)
+                .help("播放/暂停 · Space")
+
+                barButton("gobackward.10", "后退 10 秒 · J") { playback.seek(by: -10) }
+                    .disabled(!playback.isMainFeatureActive)
+                barButton("goforward.10", "前进 10 秒 · L") { playback.seek(by: 10) }
+                    .disabled(!playback.isMainFeatureActive)
+
+                Text(time(playback.currentTimeMilliseconds))
+                Slider(
+                    value: Binding(
+                        get: { Double(playback.currentTimeMilliseconds) / 1000 },
+                        set: { playback.seek(to: $0) }
+                    ),
+                    in: 0...max(1, Double(playback.currentDurationMilliseconds) / 1000)
+                )
+                .disabled(!playback.isMainFeatureActive)
+                Text("−" + time(max(0, playback.currentDurationMilliseconds - playback.currentTimeMilliseconds)))
+
+                barButton(playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", "静音 · M") {
+                    playback.toggleMute()
+                }
+                Slider(value: Binding(get: { playback.volume }, set: { playback.setVolume($0) }), in: 0...1.25)
+                    .frame(width: 70)
+
+                // The disc's popup menu is closed with the key that opens it —
+                // the "back" of a BD remote.
+                barButton("menucard", "打开/关闭光盘菜单 · P 或 Delete") { playback.navigate(.popup) }
+                barButton("dpad", "菜单方向键（键盘方向键 + Return 也可）") { showsMenuPad.toggle() }
+                    .popover(isPresented: $showsMenuPad, arrowEdge: .top) {
+                        HStack(spacing: 14) {
+                            MenuDirectionPad(playback: playback, enableShortcuts: false)
+                            Button {
+                                playback.navigate(.popup)
+                                showsMenuPad = false
+                            } label: {
+                                Label("关闭菜单", systemImage: "chevron.down.circle")
+                            }
+                        }
+                        .padding(12)
+                    }
+                barButton(
+                    playback.hasSubtitle ? "captions.bubble.fill" : "captions.bubble",
+                    playback.hasSubtitle ? "更换外挂字幕 · ⇧⌘O" : "选择外挂字幕 · ⇧⌘O",
+                    action: model.chooseSubtitle
+                )
+                barButton("info.circle", "光盘信息") { showsInfo.toggle() }
+                    .popover(isPresented: $showsInfo, arrowEdge: .top) {
+                        DiscInfoView(model: model, disc: disc)
+                    }
+                barButton(playback.isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", "全屏 · F") {
+                    playback.toggleFullScreen()
+                }
+            }
+            .font(.caption.monospacedDigit().weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 900)
+            .glassEffect(.regular.tint(.black.opacity(0.25)), in: .capsule)
+            .onHover { hovering = $0; updatePin() }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 14)
+        }
+        .onChange(of: showsMenuPad) { _, _ in updatePin() }
+        .onChange(of: showsInfo) { _, _ in updatePin() }
+    }
+
+    private func updatePin() {
+        onPinnedChanged(hovering || showsMenuPad || showsInfo)
+    }
+
+    private func barButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.white)
+        .help(help)
+    }
+
+    private func time(_ milliseconds: Int64) -> String {
+        let total = max(0, milliseconds / 1000)
+        return total >= 3600
+            ? String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
+            : String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+private struct DiscInfoView: View {
+    @ObservedObject var model: AppModel
+    let disc: DiscVolume
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if model.discs.count > 1 {
+                Picker("光盘", selection: $model.selectedDiscID) {
+                    ForEach(model.discs) { Text($0.info.displayName).tag(Optional($0.id)) }
+                }
+            } else {
+                Text(disc.info.displayName).font(.headline)
+            }
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
+                row("标题", "\(disc.info.titleCount) 个 · \(disc.info.hdmvTitleCount) HDMV · \(disc.info.bdjTitleCount) BD-J")
+                row("菜单", [disc.info.hasFirstPlay ? "First Play" : nil, disc.info.hasTopMenu ? "Top Menu" : nil]
+                    .compactMap { $0 }.joined(separator: " · "))
+                row("AACS", disc.info.usesAACS ? (disc.info.aacsReady ? "已解密" : "缺少解密后端") : "未使用")
+                row("BD+", disc.info.usesBDPlus ? (disc.info.bdplusReady ? "已解密" : "缺少解密后端") : "未使用")
+                row("libbluray", disc.info.libblurayVersion)
+                row("位置", disc.mountURL.path)
+            }
+            .font(.callout)
+            Divider()
+            HStack {
+                Text(model.externalSubtitleLabel ?? "无外挂字幕")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if model.externalSubtitle != nil { Button("清除") { model.clearSubtitle() } }
+                Button("选择…") { model.chooseSubtitle() }
+            }
+            if let error = model.subtitleError {
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            }
+            Divider()
+            HStack {
+                Text(model.playback.status).foregroundStyle(.secondary).font(.caption)
+                Spacer()
+                Button("停止", systemImage: "stop.fill") { model.playback.stop() }
+            }
+        }
+        .padding(16)
+        .frame(width: 380)
+    }
+
+    @ViewBuilder
+    private func row(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).textSelection(.enabled)
         }
     }
 }
@@ -347,122 +388,6 @@ private struct MenuDirectionPad: View {
     }
 }
 
-private struct PlayerControlsOverlay: View {
-    @ObservedObject var playback: PlaybackController
-    let onChooseSubtitle: () -> Void
-    let onHoverChanged: (Bool) -> Void
-    @State private var showsMenuPad = false
-
-    var body: some View {
-        VStack {
-            Spacer()
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    controlButton(playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", "静音 · M") {
-                        playback.toggleMute()
-                    }
-                    Slider(
-                        value: Binding(get: { playback.volume }, set: { playback.setVolume($0) }),
-                        in: 0...1.25
-                    )
-                    .frame(width: 108)
-
-                    Spacer(minLength: 16)
-                    controlButton("backward.end.fill", "上一章节") { playback.previousChapter() }
-                        .disabled(!playback.isMainFeatureActive)
-                    controlButton("gobackward.10", "后退 10 秒 · J") { playback.seek(by: -10) }
-                        .disabled(!playback.isMainFeatureActive)
-                    playPauseButton
-                    controlButton("goforward.10", "前进 10 秒 · L") { playback.seek(by: 10) }
-                        .disabled(!playback.isMainFeatureActive)
-                    controlButton("forward.end.fill", "下一章节") { playback.nextChapter() }
-                        .disabled(!playback.isMainFeatureActive)
-                    Spacer(minLength: 16)
-
-                    // The disc's own popup menu is toggled by the same key that
-                    // opens it; this is the "back / close menu" of a BD remote.
-                    controlButton("menucard", "打开/关闭光盘菜单 · P 或 Delete") {
-                        playback.navigate(.popup)
-                    }
-                    controlButton("dpad", "菜单方向键（键盘方向键 + Return 也可）") { showsMenuPad.toggle() }
-                        .popover(isPresented: $showsMenuPad, arrowEdge: .top) {
-                            HStack(spacing: 14) {
-                                MenuDirectionPad(playback: playback, enableShortcuts: false)
-                                Button {
-                                    playback.navigate(.popup)
-                                    showsMenuPad = false
-                                } label: {
-                                    Label("关闭菜单", systemImage: "chevron.down.circle")
-                                }
-                                .help("关闭光盘弹出菜单并收起方向键")
-                            }
-                            .padding(12)
-                        }
-                        // Keep the bar (and so the popover) up while the pad is in use.
-                        .onChange(of: showsMenuPad) { _, shown in onHoverChanged(shown) }
-                    controlButton(
-                        playback.hasSubtitle ? "captions.bubble.fill" : "captions.bubble",
-                        playback.hasSubtitle ? "更换外挂字幕 · ⇧⌘O" : "选择外挂字幕 · ⇧⌘O",
-                        action: onChooseSubtitle
-                    )
-                    controlButton("stop.fill", "停止") { playback.stop() }
-                    controlButton("arrow.up.left.and.arrow.down.right", "全屏 · F") {
-                        playback.toggleFullScreen()
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    Text(time(playback.currentTimeMilliseconds))
-                    Slider(
-                        value: Binding(
-                            get: { Double(playback.currentTimeMilliseconds) / 1000 },
-                            set: { playback.seek(to: $0) }
-                        ),
-                        in: 0...max(1, Double(playback.currentDurationMilliseconds) / 1000)
-                    )
-                    .disabled(!playback.isMainFeatureActive)
-                    Text("−" + time(max(0, playback.currentDurationMilliseconds - playback.currentTimeMilliseconds)))
-                }
-                .font(.caption.monospacedDigit().weight(.semibold))
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 16)
-            .frame(maxWidth: 780)
-            .glassEffect(.regular.tint(.black.opacity(0.18)).interactive(), in: .rect(cornerRadius: 26))
-            .shadow(color: .black.opacity(0.28), radius: 24, y: 12)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 20)
-        }
-        .onHover(perform: onHoverChanged)
-    }
-
-    private var playPauseButton: some View {
-        Button {
-            playback.togglePause()
-        } label: {
-            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 22, weight: .bold))
-                .frame(width: 34, height: 34)
-        }
-        .buttonStyle(.glassProminent)
-        .help("播放/暂停 · Space")
-    }
-
-    private func controlButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(width: 28, height: 28)
-        }
-        .buttonStyle(.glass)
-        .help(help)
-    }
-
-    private func time(_ milliseconds: Int64) -> String {
-        let total = max(0, milliseconds / 1000)
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
 
 private struct MenuPadButtonStyle: ButtonStyle {
     var isPrimary = false
@@ -482,19 +407,6 @@ private struct MenuPadButtonStyle: ButtonStyle {
     }
 }
 
-private struct StatusBadge: View {
-    let label: String
-    let ready: Bool
-
-    var body: some View {
-        Label(label, systemImage: ready ? "checkmark.circle.fill" : "minus.circle")
-            .font(.callout.weight(.medium))
-            .foregroundStyle(ready ? .green : .secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(.quaternary, in: Capsule())
-    }
-}
 
 private struct PlaybackBlockerView: View {
     let failure: PlaybackFailure

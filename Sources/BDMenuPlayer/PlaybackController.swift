@@ -173,6 +173,8 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var isMuted = false
     @Published private(set) var isFullScreen = false
     @Published private(set) var failure: PlaybackFailure?
+    /// The disc is opening and has not produced playback yet.
+    @Published private(set) var isOpening = false
 
     private let commands: VLCCommandActor
     private let videoView: NSView
@@ -248,6 +250,7 @@ final class PlaybackController: ObservableObject {
         attachPersistentVideoView()
         isPlaying = true
         isSessionActive = true
+        isOpening = true
         status = "Opening Blu-ray menu…"
         subtitleTrack = subtitle.flatMap { try? ASSSubtitleTrack(url: $0) }
         expectedMainDurationMilliseconds = Int64(disc.info.mainDuration * 1000)
@@ -296,6 +299,7 @@ final class PlaybackController: ObservableObject {
     func stop() {
         stateMonitor?.cancel()
         lastPlayerState = 5
+        isOpening = false
         isPlaying = false
         isSessionActive = false
         subtitleLines = []
@@ -409,6 +413,7 @@ final class PlaybackController: ObservableObject {
                     self.status = "Buffering Blu-ray menu…"
                 case 3:
                     reachedPlayback = true
+                    self.isOpening = false
                     self.isPlaying = true
                     let length = await commands.playbackLengthMilliseconds()
                     let isMainFeature = self.isMainFeature(lengthMilliseconds: length)
@@ -453,6 +458,7 @@ final class PlaybackController: ObservableObject {
     }
 
     private func failSession(log: String) {
+        isOpening = false
         isPlaying = false
         isSessionActive = false
         subtitleLines = []

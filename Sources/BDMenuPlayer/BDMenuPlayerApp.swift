@@ -8,7 +8,8 @@ struct BDMenuPlayerApp: App {
         WindowGroup {
             ContentView(model: model)
         }
-        .defaultSize(width: 1080, height: 720)
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 720)
         .commands {
             CommandMenu("Playback") {
                 Button("Play/Pause") { model.playback.togglePause() }
@@ -33,6 +34,13 @@ struct BDMenuPlayerApp: App {
                     .keyboardShortcut(.rightArrow, modifiers: [])
                 Button("Activate Menu Item") { model.playback.navigate(.activate) }
                     .keyboardShortcut(.return, modifiers: [])
+                Divider()
+                Button("Previous Chapter") { model.playback.previousChapter() }
+                    .keyboardShortcut(.pageUp, modifiers: [])
+                Button("Next Chapter") { model.playback.nextChapter() }
+                    .keyboardShortcut(.pageDown, modifiers: [])
+                Button("Stop") { model.playback.stop() }
+                    .keyboardShortcut(".", modifiers: [.command])
                 Divider()
                 Button("Toggle Full Screen") { model.playback.toggleFullScreen() }
                     .keyboardShortcut("f", modifiers: [])

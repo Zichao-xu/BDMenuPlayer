@@ -41,20 +41,24 @@ struct VideoSurfaceView: NSViewRepresentable {
 
 struct MouseActivityView: NSViewRepresentable {
     let onActivity: () -> Void
+    var onExit: () -> Void = {}
 
     func makeNSView(context: Context) -> MouseTrackingView {
         let view = MouseTrackingView()
         view.onActivity = onActivity
+        view.onExit = onExit
         return view
     }
 
     func updateNSView(_ nsView: MouseTrackingView, context: Context) {
         nsView.onActivity = onActivity
+        nsView.onExit = onExit
     }
 }
 
 final class MouseTrackingView: NSView {
     var onActivity: (() -> Void)?
+    var onExit: (() -> Void)?
     private var trackingArea: NSTrackingArea?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -63,7 +67,7 @@ final class MouseTrackingView: NSView {
         if let trackingArea { removeTrackingArea(trackingArea) }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -74,5 +78,13 @@ final class MouseTrackingView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         onActivity?()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onActivity?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onExit?()
     }
 }
