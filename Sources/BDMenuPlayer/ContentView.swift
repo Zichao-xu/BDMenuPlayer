@@ -109,21 +109,20 @@ private struct PlayerSurfaceView: View {
             }
 
             if !playback.subtitleLines.isEmpty {
-                VStack(spacing: 6) {
-                    Spacer()
-                    ForEach(Array(playback.subtitleLines.enumerated()), id: \.offset) { index, line in
-                        Text(line)
-                            .font(.system(size: index == 0 ? 30 : 38, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                            .shadow(color: .black, radius: 2, x: 0, y: 2)
-                            .padding(.horizontal, 12)
-                            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 34)
-                .allowsHitTesting(false)
+                SubtitleOverlay(lines: playback.subtitleLines, aspectRatio: playback.subtitleAspectRatio)
+                    .allowsHitTesting(false)
+            }
+
+            if playback.showsDelayToast {
+                Text(delayText(playback.subtitleDelayMilliseconds))
+                    .font(.headline.monospacedDigit())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .glassEffect(.regular, in: .capsule)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 40)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
 
             if playback.isSessionActive, showsControls {
@@ -172,6 +171,64 @@ private struct PlayerSurfaceView: View {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window.standardWindowButton(kind)?.superview?.animator().alphaValue = visible ? 1 : 0
         }
+    }
+}
+
+/// Draws external subtitle lines inside the picture area the subtitle was
+/// authored for, at the size its styles specify.
+private struct SubtitleOverlay: View {
+    let lines: [SubtitleLine]
+    let aspectRatio: Double
+
+    /// Blu-ray video is a 16:9 frame; scope films are letterboxed inside it.
+    private static let discAspect = 16.0 / 9.0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = pictureFrame(in: proxy.size)
+            ZStack {
+                stack(.top, in: frame)
+                stack(.bottom, in: frame)
+            }
+            .frame(width: frame.width, height: frame.height)
+            .position(x: frame.midX, y: frame.midY)
+        }
+    }
+
+    private func stack(_ placement: SubtitleLine.Placement, in frame: CGRect) -> some View {
+        // Lines earlier in stacking order sit closer to the edge.
+        let group = lines.filter { $0.placement == placement }
+        let ordered = placement == .bottom ? Array(group.reversed()) : group
+        return VStack(spacing: frame.height * 0.008) {
+            if placement == .bottom { Spacer(minLength: 0) }
+            ForEach(Array(ordered.enumerated()), id: \.offset) { _, line in
+                Text(line.text)
+                    .font(.system(size: max(12, line.relativeSize * frame.height), weight: .semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(line.column == 1 ? .leading : line.column == 3 ? .trailing : .center)
+                    .shadow(color: .black, radius: 0, x: 1.5, y: 1.5)
+                    .shadow(color: .black, radius: 0, x: -1.5, y: -1.5)
+                    .shadow(color: .black, radius: 0, x: 1.5, y: -1.5)
+                    .shadow(color: .black, radius: 0, x: -1.5, y: 1.5)
+                    .shadow(color: .black.opacity(0.6), radius: 4)
+                    .frame(maxWidth: .infinity, alignment: line.column == 1 ? .leading : line.column == 3 ? .trailing : .center)
+            }
+            if placement == .top { Spacer(minLength: 0) }
+        }
+        .padding(.horizontal, frame.width * 0.04)
+        .padding(.vertical, frame.height * 0.035)
+    }
+
+    private func pictureFrame(in size: CGSize) -> CGRect {
+        let video = fit(Self.discAspect, in: CGRect(origin: .zero, size: size))
+        return fit(aspectRatio, in: video)
+    }
+
+    private func fit(_ aspect: Double, in rect: CGRect) -> CGRect {
+        guard rect.width > 0, rect.height > 0, aspect > 0 else { return rect }
+        var size = CGSize(width: rect.width, height: rect.width / aspect)
+        if size.height > rect.height { size = CGSize(width: rect.height * aspect, height: rect.height) }
+        return CGRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height)
     }
 }
 
@@ -318,6 +375,22 @@ private struct DiscInfoView: View {
                 if model.externalSubtitle != nil { Button("清除") { model.clearSubtitle() } }
                 Button("选择…") { model.chooseSubtitle() }
             }
+            if model.externalSubtitle != nil {
+                HStack {
+                    Text("字幕延迟").foregroundStyle(.secondary)
+                    Text(delayText(model.playback.subtitleDelayMilliseconds)).monospacedDigit()
+                    Spacer()
+                    Button("−5s") { model.playback.adjustSubtitleDelay(by: -5_000) }
+                    Button("−0.5") { model.playback.adjustSubtitleDelay(by: -500) }
+                    Button("+0.5") { model.playback.adjustSubtitleDelay(by: 500) }
+                    Button("+5s") { model.playback.adjustSubtitleDelay(by: 5_000) }
+                    Button("归零") { model.playback.resetSubtitleDelay() }
+                }
+                .controlSize(.small)
+                Text("字幕和画面对不上时调这里，或按 G / H（加 ⇧ 每次 5 秒）。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let error = model.subtitleError {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             }
@@ -455,4 +528,9 @@ private struct PlaybackBlockerView: View {
         .foregroundStyle(.primary)
         .padding(28)
     }
+}
+
+private func delayText(_ milliseconds: Int64) -> String {
+    let seconds = Double(milliseconds) / 1000
+    return seconds == 0 ? "字幕延迟 0s" : String(format: "字幕延迟 %+.1fs", seconds)
 }

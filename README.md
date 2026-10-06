@@ -39,7 +39,8 @@
 - 读取已挂载的 Blu-ray，识别 First Play、Top Menu、HDMV 与 BD-J 能力
 - 使用原始 HDMV 菜单，而不是把光盘降级成普通视频文件
 - 通过 LibVLC 与 VideoToolbox 在 Apple Silicon 上进行硬件辅助播放
-- 支持 ASS、SSA、SRT 外挂字幕与双语字幕叠加显示
+- 支持 ASS、SSA、SRT 外挂字幕与双语字幕叠加显示，按字幕字号、上下位置及画幅比例排版
+- 支持外挂字幕延迟调整，字幕异步加载以减少界面卡顿
 - 可将两集字幕按光盘主片章节边界自动衔接
 - 窗口只显示画面；单行 Liquid Glass 控制栏随鼠标出现、静止 2 秒或移出窗口即隐藏，光标与窗口按钮一并隐藏
 - 插入光盘自动进入菜单；光盘信息与外挂字幕收在控制栏的 ⓘ 弹窗中
@@ -66,6 +67,8 @@
 | 菜单方向 / 播放时快退快进 | 方向键 |
 | 激活菜单项目 | `Return` |
 | 选择外挂字幕 | `⇧⌘O` |
+| 字幕提前 / 延后 0.5 秒 | `G` / `H` |
+| 字幕提前 / 延后 5 秒 | `⇧G` / `⇧H` |
 
 ## 系统要求
 
@@ -127,6 +130,7 @@ export BD_MENU_PLAYER_TEST_DISC="/Volumes/your-disc"
 
 ## 当前限制
 
+- ASS/SSA 字幕暂不完整还原字体、颜色、特效与精确定位
 - BD-J 菜单取决于 VLC/libbluray 的 Java 运行环境，尚未完整验证
 - Release 为临时签名，尚未加入 Developer ID 公证流程
 - 目前只发布 Apple Silicon 构建

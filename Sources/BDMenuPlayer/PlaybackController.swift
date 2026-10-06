@@ -165,7 +165,7 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var status = "Initializing ARM64 playback…"
     @Published private(set) var isPlaying = false
     @Published private(set) var isSessionActive = false
-    @Published private(set) var subtitleLines: [String] = []
+    @Published private(set) var subtitleLines: [SubtitleLine] = []
     @Published private(set) var isMainFeatureActive = false
     @Published private(set) var currentTimeMilliseconds: Int64 = 0
     @Published private(set) var currentDurationMilliseconds: Int64 = 0
@@ -175,11 +175,14 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var failure: PlaybackFailure?
     /// The disc is opening and has not produced playback yet.
     @Published private(set) var isOpening = false
+    @Published private(set) var subtitleDelayMilliseconds: Int64 = 0
+    @Published private(set) var showsDelayToast = false
+    private var delayToastTask: Task<Void, Never>?
 
     private let commands: VLCCommandActor
     private let videoView: NSView
     private var stateMonitor: Task<Void, Never>?
-    private var subtitleTrack: ASSSubtitleTrack?
+    private var subtitleTrack: SubtitleTrack?
     private var expectedMainDurationMilliseconds: Int64 = 0
     private var currentDisc: DiscVolume?
     private var currentSubtitle: URL?
@@ -252,7 +255,8 @@ final class PlaybackController: ObservableObject {
         isSessionActive = true
         isOpening = true
         status = "Opening Blu-ray menu…"
-        subtitleTrack = subtitle.flatMap { try? ASSSubtitleTrack(url: $0) }
+        subtitleTrack = nil
+        if let subtitle { loadSubtitle(subtitle) }
         expectedMainDurationMilliseconds = Int64(disc.info.mainDuration * 1000)
         subtitleLines = []
         isMainFeatureActive = false
@@ -281,17 +285,58 @@ final class PlaybackController: ObservableObject {
 
     func addSubtitle(_ subtitle: URL) {
         currentSubtitle = subtitle
-        subtitleTrack = try? ASSSubtitleTrack(url: subtitle)
-        status = subtitleTrack == nil ? "Subtitle loading failed" : "Bilingual subtitle loaded"
+        subtitleDelayMilliseconds = 0
+        loadSubtitle(subtitle)
+    }
+
+    /// Parsing a feature-length ASS takes long enough to stall the UI.
+    private func loadSubtitle(_ url: URL) {
+        Task { [weak self] in
+            let track = await Task.detached(priority: .userInitiated) { try? SubtitleTrack(url: url) }.value
+            guard let self, self.currentSubtitle == url else { return }
+            if let track, !track.cues.isEmpty {
+                self.subtitleTrack = track
+                self.status = "External subtitle loaded"
+            } else {
+                self.subtitleTrack = nil
+                self.status = "外挂字幕里没有可显示的台词"
+            }
+        }
+    }
+
+    /// Positive values show the subtitle later. Fixes subtitles timed against
+    /// an encode whose start differs from the disc's main feature.
+    func adjustSubtitleDelay(by milliseconds: Int64) {
+        guard subtitleTrack != nil else { return }
+        subtitleDelayMilliseconds += milliseconds
+        flashSubtitleDelay()
+    }
+
+    func resetSubtitleDelay() {
+        subtitleDelayMilliseconds = 0
+        flashSubtitleDelay()
+    }
+
+    private func flashSubtitleDelay() {
+        delayToastTask?.cancel()
+        showsDelayToast = true
+        delayToastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            self?.showsDelayToast = false
+        }
     }
 
     func clearSubtitle() {
         currentSubtitle = nil
+        subtitleDelayMilliseconds = 0
         subtitleTrack = nil
         subtitleLines = []
     }
 
     var hasSubtitle: Bool { subtitleTrack != nil }
+    /// Frame aspect the subtitle was authored for, used to size the overlay.
+    var subtitleAspectRatio: Double { subtitleTrack?.aspectRatio ?? 16 / 9 }
 
     /// The disc that the current (or last failed) session belongs to.
     var activeDiscID: DiscVolume.ID? { currentDisc?.id }
@@ -426,8 +471,9 @@ final class PlaybackController: ObservableObject {
                     if isMainFeature {
                         self.status = self.subtitleTrack == nil
                             ? "Playing main feature"
-                            : "Playing main feature · bilingual subtitle enabled"
-                        self.subtitleLines = self.subtitleTrack?.lines(at: self.currentTimeMilliseconds) ?? []
+                            : "Playing main feature · external subtitle enabled"
+                        let lines = self.subtitleTrack?.lines(at: self.currentTimeMilliseconds - self.subtitleDelayMilliseconds) ?? []
+                        if lines != self.subtitleLines { self.subtitleLines = lines }
                     } else {
                         self.status = "Playing original Blu-ray menu"
                         self.subtitleLines = []

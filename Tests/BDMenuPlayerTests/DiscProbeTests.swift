@@ -114,9 +114,71 @@ final class DiscProbeTests: XCTestCase {
         try subtitle.write(to: url, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let track = try ASSSubtitleTrack(url: url)
-        XCTAssertEqual(track.lines(at: 2_000), ["こんにちは", "你好"])
+        let track = try SubtitleTrack(url: url)
+        XCTAssertEqual(track.lines(at: 2_000).map(\.text), ["こんにちは", "你好"])
         XCTAssertTrue(track.lines(at: 4_000).isEmpty)
+    }
+
+    func testASSParserAcceptsAnyStyleAndStacksLikeLibass() throws {
+        let url = try fixture("ass", """
+        \u{FEFF}[Script Info]
+        PlayResX: 1920
+        PlayResY: 816
+
+        [V4+ Styles]
+        Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+        Style: Lines_CN,A,50,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+        Style: Lines_JP,A,30,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+        Style: Note,A,30,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
+
+        [Events]
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Dialogue: 0,1:19:30.00,1:19:34.00,Lines_CN,,0,0,0,,不出所料，重启前，13号机还动不了
+        Dialogue: 0,1:19:30.00,1:19:34.00,Lines_JP,,0,0,0,,予想どおり\\N13号機は まだ動けない
+        Dialogue: 0,1:19:30.00,1:19:34.00,Note,,0,0,0,,注释, 带逗号
+        Dialogue: 0,1:19:30.00,1:19:34.00,Lines_CN,,0,0,0,,{\\p1}m 0 0 l 10 10{\\p0}
+        """.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n"))
+
+        let track = try SubtitleTrack(url: url)
+        let lines = track.lines(at: (79 * 60 + 32) * 1000)
+        XCTAssertEqual(lines.map(\.text), ["不出所料，重启前，13号机还动不了", "予想どおり\n13号機は まだ動けない", "注释, 带逗号"])
+        XCTAssertEqual(lines.map(\.placement), [.bottom, .bottom, .top])
+        XCTAssertEqual(lines[0].relativeSize, 50.0 / 816, accuracy: 0.0001)
+        XCTAssertEqual(track.aspectRatio, 1920.0 / 816, accuracy: 0.001)
+    }
+
+    func testSRTSubtitleIsParsed() throws {
+        let url = try fixture("srt", """
+        1
+        00:00:01,000 --> 00:00:03,500
+        <i>你好</i>
+        こんにちは
+
+        2
+        00:00:04,000 --> 00:00:05,000
+        再见
+        """)
+        let track = try SubtitleTrack(url: url)
+        XCTAssertEqual(track.lines(at: 2_000).map(\.text), ["你好\nこんにちは"])
+        XCTAssertEqual(track.lines(at: 4_500).map(\.text), ["再见"])
+        XCTAssertTrue(track.lines(at: 3_700).isEmpty)
+    }
+
+    func testConfiguredExternalSubtitleHasCues() throws {
+        guard let path = ProcessInfo.processInfo.environment["BD_MENU_PLAYER_TEST_SUBTITLE"] else {
+            throw XCTSkip("Set BD_MENU_PLAYER_TEST_SUBTITLE to a real subtitle file")
+        }
+        let track = try SubtitleTrack(url: URL(fileURLWithPath: path))
+        XCTAssertGreaterThan(track.cues.count, 0)
+        print("cues:", track.cues.count, "sample:", track.lines(at: (79 * 60 + 32) * 1000).map(\.text))
+    }
+
+    private func fixture(_ ext: String, _ contents: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "BDMenuPlayer-\(UUID().uuidString).\(ext)")
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
     }
 
     private func configuredDiscURL() throws -> URL {

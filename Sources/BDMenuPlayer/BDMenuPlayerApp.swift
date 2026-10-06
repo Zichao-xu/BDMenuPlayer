@@ -35,6 +35,15 @@ struct BDMenuPlayerApp: App {
                 Button("Activate Menu Item") { model.playback.navigate(.activate) }
                     .keyboardShortcut(.return, modifiers: [])
                 Divider()
+                Button("Subtitle Earlier 0.5s") { model.playback.adjustSubtitleDelay(by: -500) }
+                    .keyboardShortcut("g", modifiers: [])
+                Button("Subtitle Later 0.5s") { model.playback.adjustSubtitleDelay(by: 500) }
+                    .keyboardShortcut("h", modifiers: [])
+                Button("Subtitle Earlier 5s") { model.playback.adjustSubtitleDelay(by: -5_000) }
+                    .keyboardShortcut("g", modifiers: [.shift])
+                Button("Subtitle Later 5s") { model.playback.adjustSubtitleDelay(by: 5_000) }
+                    .keyboardShortcut("h", modifiers: [.shift])
+                Divider()
                 Button("Previous Chapter") { model.playback.previousChapter() }
                     .keyboardShortcut(.pageUp, modifiers: [])
                 Button("Next Chapter") { model.playback.nextChapter() }
